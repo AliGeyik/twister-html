@@ -8,7 +8,6 @@ var handlersInstalled = false;
 function initializeTwister( redirectNetwork, redirectLogin, cbFunc, cbArg ) {
     if( !handlersInstalled ) {
         interfaceNetworkHandlers();
-        interfaceCommonLoginHandlers();
         installUserSearchHandler();
         installProfileEditHandlers();
         // install scrollbottom handler to load more posts as needed
@@ -24,10 +23,13 @@ function initializeTwister( redirectNetwork, redirectLogin, cbFunc, cbArg ) {
             $.mobile.silentScroll(0);
         });
         // reply text counter both newmsg and dmchat
-        var $replyText = $( ".post-area-new textarea" );
-        $replyText.unbind('keyup').keyup( replyTextKeypress );
-        
-        setInterval("tmobileTick()", 2000);
+        $('.post-area-new textarea')
+            .off('input keyup')
+            .on('focus', poseTextareaPostTools)
+            .on('keyup', replyTextInput)
+            .on('keyup', function() { replyTextUpdateRemaining(this); })
+        ;
+
         handlersInstalled = true;
     }
 
@@ -52,10 +54,12 @@ function initializeTwister( redirectNetwork, redirectLogin, cbFunc, cbArg ) {
                         requestLastHave();
                         initMentionsCount();
                         initDMsCount();
-                    
+                        twisterFollowingO = TwisterFollowing(defaultScreenName);
+
                         twisterInitialized = true;
                         if( cbFunc )
                             cbFunc(cbArg);
+                        setInterval("tmobileTick()", 2000);
                     });
                 } else {
                     if( cbFunc )
@@ -96,7 +100,9 @@ var router=new $.mobile.Router(
             initializeTwister( true, true, function() {
                 if( !$("#home .posts").children().length ) {
                     $.mobile.showPageLoadingMsg();
+                    cleanupStorage();
                     getFullname( defaultScreenName, $("#home .rtitle"));
+                    $(".mentions-count").attr("href","#mentions?user="+defaultScreenName );
                     $.MAL.setPostTemplate( $("#post-template-home") );
                     requestTimelineUpdate("latestFirstTime",postsPerRefresh,followingUsers);
                 }
@@ -154,7 +160,10 @@ var router=new $.mobile.Router(
                 }
                 $.mobile.showPageLoadingMsg();
                 $("#following a.ui-btn").removeClass("ui-btn-active");
-                showFollowingUsers();
+                var followingList = twister.tmpl.followingList.clone(true).appendTo($("#following .content"))
+                    .closest('.following-list').listview();
+                appendFollowingToElem(followingList);
+                followingList.find('[data-role="button"]').button();
             });
         },
         post: function(type,match,ui) {
@@ -243,11 +252,12 @@ var router=new $.mobile.Router(
             });
         },
         login: function(type,match,ui) {
+            if (!$('#login .content').children().length)
+                $('#login .content').append(twister.tmpl.loginMC.clone(true)).trigger('create');
             $.mobile.showPageLoadingMsg();
             initializeTwister( true, false, function() {
                 $.mobile.hidePageLoadingMsg();
-                $("select.local-usernames.login-user").selectmenu("refresh", true);
-                installCreateUserClick();
+                $("select.local-usernames").selectmenu("refresh", true);
             });
         },
         network: function(type,match,ui) {
@@ -262,25 +272,38 @@ var router=new $.mobile.Router(
         directmsg: function(type,match,ui) {
             $.mobile.showPageLoadingMsg();
             initializeTwister( true, true, function() {
-                var $dmThreadList = $("#directmsg ul.direct-messages-thread");
                 $.mobile.showPageLoadingMsg();
-                requestDMsnippetList($dmThreadList);
+                modalDMsSummaryDraw($('#directmsg .direct-messages-list'));
             });
         },
         dmchat: function(type,match,ui) {
             var params=router.getParams(match[1]);
             $.mobile.showPageLoadingMsg();
             initializeTwister( true, true, function() {
-                var user = params.user;
-                var dmConvo = $("#dmchat ul.direct-messages-list");
-                $("#dmchat .rtitle").text("Chat @" + user);
+                var peerAlias = params.user;
+                var board = $('#dmchat .direct-messages-thread').empty();
+
+                $('#dmchat .rtitle').text('Chat @' + peerAlias);
                 $("#dmchat textarea").val("");
-                dmConvo.html("");
-                installDMSendClick();
-                
+                installDMSendClick(peerAlias);
+
                 $.mobile.showPageLoadingMsg();
-                dmChatUser = user;
-                requestDmConversation(dmConvo,user);
+
+                tmobileQueryReq = queryStart(board, peerAlias, 'direct', undefined, 2000, {
+                    boardAutoAppend: true,
+                    lastId: 0,
+                    lengthNew: 0,
+                    ready: function (req, peerAlias) {
+                        twister.DMs[peerAlias] = twister.res[req];
+                    },
+                    readyReq: peerAlias,
+                    drawFinish: function (req) {
+                        setTimeout($.MAL.dmConversationLoaded, 200, twister.res[req].board);
+                    },
+                    skidoo: function (req) {
+                        return $.mobile.activePage.attr('id') !== 'dmchat' || req !== tmobileQueryReq;
+                    }
+                });
             });
         },
         search: function(type,match,ui) {
@@ -297,7 +320,7 @@ var router=new $.mobile.Router(
         },
     }, {
         defaultHandler: function(type, ui, page) {
-            console.log("Default handler called due to unknown route (" 
+            console.log("Default handler called due to unknown route ("
                         + type + ", " + ui + ", " + page + ")" );
             console.log(ui);
             console.log(page);
@@ -317,11 +340,11 @@ function installPostboardClick() {
         $.mobile.showPageLoadingMsg();
         $.mobile.navigate( url );
     });
-    
+
     $(".post a").unbind('click').click(function(e) {
         e.stopPropagation();
-        
-        // stopPropagation is supposed to be enough, but in Android the 
+
+        // stopPropagation is supposed to be enough, but in Android the
         // default action is not called so we reimplement it here as a hack.
         e.preventDefault();
         $.mobile.showPageLoadingMsg();
@@ -381,22 +404,20 @@ function installSubmitClick() {
     });
 }
 
-function installDMSendClick() {
-    var $postSubmit = $(".dm-submit");
-    $postSubmit.unbind('click').click(function(e){
-        e.stopPropagation();
-        e.preventDefault();
-        var $this = $( this );
-        var $replyText = $this.closest(".post-area-new").find("textarea");
+function installDMSendClick(peerAlias) {
+    $('.dm-submit').off('click').on('click', {peerAlias: peerAlias},
+        function (event) {
+            muteEvent(event, true);
 
-        var $dmConversation = $(".directMessages");
+            var elemTextArea = $(event.target).closest('.post-area-new').find('textarea');
+            if (!elemTextArea.val())
+                return;
 
-        var s = encode_utf8($replyText.val());
-        newDirectMsg(s, dmChatUser);
-        $replyText.val("");
-    });
+            newDirectMsg(encode_utf8(elemTextArea.val()), event.data.peerAlias);
+            elemTextArea.val('');
+        }
+    );
 }
-
 
 function installRetransmitConfirmClick() {
     var $postConfirmRt = $(".retransmit-confirm");
@@ -412,29 +433,20 @@ function installRetransmitConfirmClick() {
     });
 }
 
-function installCreateUserClick() {
-    $( ".create-user").unbind('click').click( function(e) {
-        createUserClick( function(username, secretKey) { 
-            defaultScreenName = username;
-            if(defaultScreenName) {
-                saveScreenName();
-            }
-            $(".secret-key").text(secretKey);
-            sendNewUserTransaction( username, function() {} );
-            $.mobile.navigate( "#new-user-modal" ); } );
-    });
-}
-
 function installUserSearchHandler() {
-    var $userSearchField = $( ".userMenu-search-field" );
-    $userSearchField.unbind('keyup').keyup( userSearchKeypress );
-    $userSearchField.unbind('click').bind( "click", userSearchKeypress );
+    $('.userMenu-search-field')
+        .off('click input')
+        .on('keyup', userSearchEnter)
+        .on('click keyup',
+            {hashtags: true, handleRet: processDropdownUserResults,
+                handleRetZero: closeSearchDialog}, userSearchKeypress)
+    ;
 }
 
 function installProfileEditHandlers() {
     $(".profile-card-photo.forEdition").click( function() { $('#avatar-file').click(); } );
     $("#avatar-file").bind( "change", handleAvatarFileSelectMobile);
-    $(".submit-changes").click( function() { 
+    $(".submit-changes").click( function() {
         saveProfile();
         setTimeout( function() {$.MAL.goHome();}, 1000);
     } );
@@ -482,6 +494,15 @@ function handleAvatarFileSelectMobile(evt) {
     }
 }
 
+function handleClickOpenConversation(event) {
+    event.stopPropagation();
+    event.preventDefault();
+
+    var userpost = $(event.target).closest(event.data.feeder).attr('data-userpost');
+
+    $.mobile.showPageLoadingMsg();
+    $.mobile.navigate('#post?userpost=' + encodeURIComponent(userpost));
+}
 
 
 function clearProfilePage() {
@@ -510,7 +531,7 @@ function encode_utf8(s) {
     var ua = navigator.userAgent;
     if( ua.indexOf("Android") >= 0 )
     {
-        var androidversion = parseFloat(ua.slice(ua.indexOf("Android")+8)); 
+        var androidversion = parseFloat(ua.slice(ua.indexOf("Android")+8));
         if (androidversion < 3.0)
         {
             return unescape(encodeURIComponent(s));
@@ -519,22 +540,20 @@ function encode_utf8(s) {
     return s;
 }
 
-var hashtag_elem;
-var hashtag_tag;
-var hashtag_res;
-function setupHashtagOrMention( ulElem, tag, res) {
-    hashtag_elem = ulElem;
-    hashtag_tag = tag;
-    hashtag_res = res;
-    hashtag_elem.text("");
+var tmobileQueryReq;
+
+function setupHashtagOrMention(board, query, resource) {
     $.MAL.setPostTemplate( $("#post-template-home") );
     $.mobile.showPageLoadingMsg();
-    clearHashtagProcessed();
-    if( tag == defaultScreenName && res == "mention" ) {
-        // obtain already cached mention posts from twister_newmsgs.js
-        processHashtag(hashtag_elem, defaultScreenName, getMentionsData() );
-    }
-    requestHashtag(hashtag_elem,hashtag_tag,hashtag_res);
+    board.empty();
+
+    tmobileQueryReq = queryStart(board, query, resource, undefined, undefined, {
+        boardAutoAppend: true,
+        skidoo: function (req) {
+            var curPage = $.mobile.activePage.attr('id');
+            return (curPage !== 'mentions' && curPage !== 'hashtag') || req !== tmobileQueryReq;
+        }
+    });
 }
 
 // every 2 seconds do something page specific.
@@ -556,12 +575,12 @@ function tmobileTick() {
                     }
                 }, {} );
     }
-    if( curPage == "mentions" ||  curPage == "hashtag" ) {
-        autoUpdateHashtag = true;
-        requestHashtag(hashtag_elem,hashtag_tag,hashtag_res);
-    }
-    if( curPage == "dmchat" ) {
-        requestDmConversation($("#dmchat ul.direct-messages-list"),dmChatUser);
-    }
 }
 
+$(document).bind('mobileinit', function () {
+  $.mobile.allowCrossDomainPages = true;
+  $.mobile.zoom.enabled = false;
+  $.mobile.buttonMarkup.hoverDelay = 0; //defaults 200
+  $.mobile.defaultDialogTransition = 'none';
+  $.mobile.defaultPageTransition = 'none';
+});

@@ -10,84 +10,68 @@
     <script src="js/jquery.jsonrpcclient.js"></script>
     <script src="js/jquery.storageapi.js"></script>
     <script src="js/options.js"></script>
+    <script src="js/franc.js"></script>
+    <script src="js/notify.js"></script>
     <script src="js/mobile_abstract.js"></script>
     <script src="js/twister_io.js"></script>
     <script src="js/polyglot.min.js"></script>
     <script src="js/interface_localization.js"></script>
     <script src="js/twister_user.js"></script>
+    <script src="js/twister_formatpost.js"></script>
+    <script src="js/twister_actions.js"></script>
     <script src="js/twister_network.js"></script>
     <script src="js/twister_following.js"></script>
     <script src="js/twister_newmsgs.js"></script>
     <script src="js/interface_common.js"></script>
     <script src="js/interface_profile-edit.js"></script>
-    <script src="js/calm.js"></script>
 
-    <script>
-        $(document).ready(function()
-        {
-           initProfileEdit();
-        });
-        changeStyle()
-    </script>
-
-    <link rel="icon" type="image/png" href="img/twister_mini.png" />
+    <link rel="shortcut icon" type="image/png" href="img/twister_mini.png" />
   </head>
 
   <body>
-    
-  <!-- MENU SUPERIOR INIT --> 
+
+  <!-- MENU SUPERIOR INIT -->
   <nav class="userMenu">
     <ul>
-      <li class="userMenu-home"><a href="home.html">Home</a></li>
-      <li class="userMenu-network"><a href="network.html">Network</a></li>
-      <li class="userMenu-profile current"><a href="profile-edit.html">Profile</a></li>
+      <li class="userMenu-home"><a href="home.html">
+        <span class="selectable_theme theme_original label">Home</span>
+        <span class="selectable_theme theme_nin menu-news"></span>
+      </a></li>
+      <li class="userMenu-network selectable_theme theme_original theme_nin"><a class="label" href="network.html">Network</a></li>
+      <li class="userMenu-profile selectable_theme theme_original theme_nin current"><a class="label" href="profile-edit.html">Profile</a></li>
       <li class="userMenu-config">
-        <a class="userMenu-config-dropdown" href="#">
+        <a class="userMenu-config-dropdown">
           <div class="config-menu dialog-modal">
-            <div class="mini-profile-info">
+            <div class="mini-profile-info selectable_theme theme_original">
               <div class="mini-profile-photo"><img src="img/grayed_avatar_placeholder_24.png" alt="user-photo"/></div>
               <a href="#" class="mini-profile-name">Fulano da Silva</a>
               <span class="mini-profile-view">View</span>
             </div>
             <a class="dropdown-menu-item" href="options.html">Options</a>
             <a class="dropdown-menu-item" href="profile-edit.html">Setup account</a>
-            <a class="dropdown-menu-item" href="following.html">Following users</a>
             <a class="dropdown-menu-item" href="network.html">Network config</a>
-            <a class="dropdown-menu-item" href="login.html">Change user</a>
-            <a class="direct-messages" href="#">Direct Messages</a>
           </div>
         </a>
       </li>
-      <li class="userMenu-connections">
-        <a href="#">
-          <span class="messages-qtd" style="display:none;">12</span>
-        </a>
-      </li>
-      <li class="userMenu-messages">
-        <a href="#">
-          <span class="messages-qtd" style="display:none;">12</span>
-        </a>
-      </li>
-      <li class="userMenu-search">
-        <input type="text" class="userMenu-search-field" placeholder="search">
-      </li>
+      <li class="userMenu-dhtindicator selectable_theme theme_calm"><a href="network.html"></a></li>
     </ul>
   </nav>
   <!-- MENU SUPERIOR END -->
 
 
   <div class="wrapper">
-
-  <!-- ÁREA DE PROFILE PHOTO INIT --> 
+  <!-- ÁREA DE PROFILE PHOTO INIT -->
     <div class="profile-card forEdition">
       <!-- Coloquei a imagem de fundo do card do usuário como background da div abaixo inline na tag para poder ser alterada dinamicamente -->
       <div class="profile-card-main" style="background: url(img/img.png) no-repeat center center #b43e34;">
         <img class="profile-card-photo forEdition" src="img/genericPerson.png"/>
         <input type="text" class="input-name" placeholder="Full name here"/>
         <h2></h2>
-        <input type="text" class="input-description" placeholder="Describe yourself"/>
+        <textarea class="input-description" placeholder="Describe yourself"></textarea>
         <input type="text" class="input-city" placeholder="Location"/>
         <input type="text" class="input-website" placeholder="website"/>
+        <input type="text" class="input-tox" placeholder="Tox address"/>
+        <input type="text" class="input-bitmessage" placeholder="Bitmessage address"/>
       </div>
       <div class="profile-edition-buttons">
           <button class="toggle-priv-key" style="float: left" href="#">Secret Key</button>
@@ -98,12 +82,28 @@
       <div style="font-size:80%;text-align: center;" class="secret-key-container">
          <span class="label">Secret key:</span> <span class="secret-key"></span>
       </div>
-      
     </div>
-    
-  <!-- ÁREA DE POSTS END -->
-    
+  </div>
+
     <input type="file" id="avatar-file" name="avatar_files" style="display:none;"/>
 
+  <div id="templates" style="display:none;">
+    <div class="prompt-wrapper">
+      <div class="modal-header">
+        <h3></h3>
+        <span class="modal-close prompt-close">&times;</span>
+      </div>
+      <div class="modal-content"></div>
+        <div class="modal-blackout"></div>
+    </div>
+
+    <div id="confirm-popup-template">
+        <div class="message"></div>
+        <div class="modal-buttons">
+            <button class="confirm"></button>
+            <button class="cancel"></button>
+        </div>
+    </div>
+  </div>
   </body>
 </html>

@@ -4,14 +4,34 @@
 // Provides functions for periodic network status check
 // Interface to network.html page.
 
+var twisterVersion;
+var twisterDisplayVersion;
 var twisterdConnections = 0;
 var twisterdAddrman = 0;
 var twisterDhtNodes = 0;
 var twisterdBlocks = 0;
 var twisterdLastBlockTime = 0;
 var twisterdConnectedAndUptodate = false;
+var genproclimit = 1;
 
 // ---
+
+function formatDecimal(value) {
+    if (!value) return '0';
+    var exponent = Math.floor(Math.log(value) / Math.LN10),
+        scale = (exponent < 2) ? Math.pow(10, 2 - exponent) : 1;
+    return Math.round(value * scale) / scale;
+}
+function formatSize(value) {
+    if (value<1024) return value + ' B';
+    if (value<1024*1024) return formatDecimal(value/1024) + ' KB';
+    if (value<1024*1024*1024) return formatDecimal(value/(1024*1024)) + ' MB';
+    if (value<1024*1024*1024*1024) return formatDecimal(value/(1024*1024*1024)) + ' GB';
+    return formatDecimal(value/(1024*1024*1024*1024)) + ' TB';
+}
+function formatSpeed(total, rate) {
+    return formatSize(total) + ' @ ' + formatSize(rate) + '/s'
+}
 
 function requestNetInfo(cbFunc, cbArg) {
     twisterRpc("getinfo", [],
@@ -21,9 +41,9 @@ function requestNetInfo(cbFunc, cbArg) {
                    twisterdBlocks      = ret.blocks;
                    twisterDhtNodes     = ret.dht_nodes;
                    twisterVersion      = ("0000000" + ret.version).slice(-8);
-                   twisterDisplayVersion = twisterVersion.slice(0,2) + '.' + 
-                                           twisterVersion.slice(2,4) + '.' + 
-                                           twisterVersion.slice(4,6) + '.' + 
+                   twisterDisplayVersion = twisterVersion.slice(0,2) + '.' +
+                                           twisterVersion.slice(2,4) + '.' +
+                                           twisterVersion.slice(4,6) + '.' +
                                            twisterVersion.slice(6,8);
 
                    $(".connection-count").text(twisterdConnections);
@@ -32,6 +52,34 @@ function requestNetInfo(cbFunc, cbArg) {
                    $(".dht-nodes").text(twisterDhtNodes);
                    $(".userMenu-dhtindicator a").text(twisterDhtNodes);
                    $(".version").text(twisterDisplayVersion);
+
+                   if( ret.proxy !== undefined && ret.proxy.length ) {
+                       $(".proxy").text(ret.proxy);
+                       $(".using-proxy").show();
+                       $(".not-using-proxy").hide();
+                   } else {
+                       $(".ext-ip").text(ret.ext_addr_net1);
+                       $(".ext-port1").text(ret.ext_port1);
+                       $(".ext-port2").text(ret.ext_port2);
+                       $(".test-ext-port1").attr("href","http://www.yougetsignal.com/tools/open-ports/?port=" + ret.ext_port1);
+                       $(".test-ext-port2").attr("href","http://www.yougetsignal.com/tools/open-ports/?port=" + ret.ext_port2);
+                       $(".using-proxy").hide();
+                       $(".not-using-proxy").show();
+                   }
+
+                   $(".dht-torrents").text(ret.dht_torrents);
+                   $(".num-peers").text(ret.num_peers);
+                   $(".peerlist-size").text(ret.peerlist_size);
+                   $(".num-active-requests").text(ret.num_active_requests);
+
+                   $(".download-rate").text(formatSpeed(ret.total_download, ret.download_rate));
+                   $(".upload-rate").text(formatSpeed(ret.total_upload, ret.upload_rate));
+                   $(".dht-download-rate").text(formatSpeed(ret.total_dht_download, ret.dht_download_rate));
+                   $(".dht-upload-rate").text(formatSpeed(ret.total_dht_upload, ret.dht_upload_rate));
+                   $(".ip-overhead-download-rate").text(formatSpeed(ret.total_ip_overhead_download, ret.ip_overhead_download_rate));
+                   $(".ip-overhead-upload-rate").text(formatSpeed(ret.total_ip_overhead_upload, ret.ip_overhead_upload_rate));
+                   $(".payload-download-rate").text(formatSpeed(ret.total_payload_download, ret.payload_download_rate));
+                   $(".payload-upload-rate").text(formatSpeed(ret.total_payload_upload, ret.payload_upload_rate));
 
                    if( !twisterdConnections ) {
                        $.MAL.setNetworkStatusMsg(polyglot.t("Connection lost."), false);
@@ -98,45 +146,56 @@ function requestBestBlock(cbFunc, cbArg) {
                }, {});
 }
 
+function requestNthBlock(n, cbFunc, cbArg) {
+    twisterRpc("getblockhash", [n],
+        function(args, hash) {
+            requestBlock(hash, args.cbFunc, args.cbArg);
+        }, {cbFunc:cbFunc, cbArg:cbArg},
+        function(args, ret) {
+            console.log("getblockhash error");
+        }, {});
+}
+
 function requestBlock(hash, cbFunc, cbArg) {
     twisterRpc("getblock", [hash],
                function(args, block) {
-                   twisterdLastBlockTime = block.time;
-                   $(".last-block-time").text( timeGmtToText(twisterdLastBlockTime) );
-
                    if( args.cbFunc )
-                       args.cbFunc(args.cbArg);
+                       args.cbFunc(block, args.cbArg);
                }, {cbFunc:cbFunc, cbArg:cbArg},
                function(args, ret) {
                    console.log("requestBlock error");
                }, {});
 }
 
-
 function networkUpdate(cbFunc, cbArg) {
     requestNetInfo(function () {
-        requestBestBlock(function(args) {
+        requestBestBlock(function(block, args) {
+
+            twisterdLastBlockTime = block.time;
+            $(".last-block-time").text(timeGmtToText(twisterdLastBlockTime));
+
             var curTime = new Date().getTime() / 1000;
-            if( twisterdConnections ) {
-                if( twisterdLastBlockTime > curTime + 3600 ) {
+            if (twisterdConnections) {
+                if (twisterdLastBlockTime > curTime + 3600) {
                     $.MAL.setNetworkStatusMsg(polyglot.t("Last block is ahead of your computer time, check your clock."), false);
                     twisterdConnectedAndUptodate = false;
-                } else if( twisterdLastBlockTime > curTime - (2 * 3600) ) {
-                    if( twisterDhtNodes ) {
+                } else if (twisterdLastBlockTime > curTime - (2 * 3600)) {
+                    if (twisterDhtNodes) {
                         $.MAL.setNetworkStatusMsg(polyglot.t("Block chain is up-to-date, twister is ready to use!"), true);
                         twisterdConnectedAndUptodate = true;
-                     } else {
+                    } else {
                         $.MAL.setNetworkStatusMsg(polyglot.t("DHT network down."), false);
                         twisterdConnectedAndUptodate = true;
-                     }
+                    }
                 } else {
-                    var daysOld = (curTime - twisterdLastBlockTime) / (3600*24);
-                    $.MAL.setNetworkStatusMsg(polyglot.t("downloading_block_chain", { days: daysOld.toFixed(2) }), false);
-                    twisterdConnectedAndUptodate = false;
+                    var daysOld = (curTime - twisterdLastBlockTime) / (3600 * 24);
+                    $.MAL.setNetworkStatusMsg(polyglot.t("downloading_block_chain", {days: daysOld.toFixed(2)}), false);
+                    // don't alarm user if blockchain is just a little bit behind
+                    twisterdConnectedAndUptodate = (daysOld < 2);
                 }
             }
-            if( args.cbFunc )
-                args.cbFunc(args.cbArg)
+            if (args.cbFunc)
+                args.cbFunc(args.cbArg);
         }, {cbFunc:cbFunc, cbArg:cbArg} );
     });
 }
@@ -146,6 +205,7 @@ function getMiningInfo(cbFunc, cbArg) {
                function(args, ret) {
                    miningDifficulty    = ret.difficulty;
                    miningHashRate      = ret.hashespersec;
+                   genproclimit        = ret.genproclimit;
 
                    $(".mining-difficulty").text(miningDifficulty);
                    $(".mining-hashrate").text(miningHashRate);
@@ -208,21 +268,23 @@ function getSpamMsg() {
                }, {});
 }
 
-function setSpamMsg() {
-    var $postArea = $(".spam-msg");
-    var $localUsersList = $("select.local-usernames.spam-user");
-    var params = [$localUsersList.val(), $postArea.val()]
+function setSpamMsg(event) {
+    event.stopPropagation();
+    event.preventDefault();
+
+    var btnUpdate = $(event.target);
+    $.MAL.disableButton(btnUpdate);
+
+    var params = [$("select.local-usernames.spam-user").val(),
+        btnUpdate.closest('.post-area-new').find('textarea.spam-msg').val().trim()];
+
     twisterRpc("setspammsg", params,
-               function(args, ret) {
-                   console.log("setspammsg updated");
-               }, {},
-               function(args, ret) {
-                   console.log("setspammsg error");
-               }, {});
+        function(args, ret) {console.log("setspammsg updated");}, {},
+        function(args, ret) {console.log("setspammsg error");}, {}
+    );
 }
 
 function exitDaemon() {
-  if (confirm('Are you sure you want to exit the daemon?\nThe Twister client will stop working.')) {
     $( ".terminate-daemon").text("Exiting...");
     $( ".terminate-daemon").addClass("disabled");
     $.MAL.disableButton( $( ".terminate-daemon") );
@@ -238,8 +300,6 @@ function exitDaemon() {
                 function(args, ret) {
                     console.log("error while exiting daemon");
                 }, {});
-
-  }
 }
 
 // handlers common to both desktop and mobile
@@ -249,8 +309,12 @@ function interfaceNetworkHandlers() {
     $( ".add-peer").bind( "click", addPeerClick );
     $( ".add-dns").bind( "click", addDNSClick );
     $( "select.genblock").change( setGenerate );
-    $( ".update-spam-msg").bind( "click", setSpamMsg );
-    $( ".terminate-daemon").bind( "click", exitDaemon )
+    $( ".genproclimit").change( setGenerate );
+    $('.network .post-area-new').off('click').on('click',
+        function (e) {e.stopPropagation(); $(this).addClass('open'); usePostSpliting = false;});
+    $('.post-submit.update-spam-msg').off('click').on('click', setSpamMsg);
+    $('.terminate-daemon').on('click',
+        {txtMessage: {polyglot: 'confirm_terminate_daemon'}, cbConfirm: exitDaemon}, confirmPopup);
 }
 
 
@@ -264,12 +328,16 @@ function initInterfaceNetwork() {
                 initMentionsCount();
                 initDMsCount();
             });
+        } else {
+            $('.userMenu-profile > a').attr('href', '#/login').text(polyglot.t('Login'));
         }
     });
     networkUpdate();
     setInterval("networkUpdate()", 2000);
 
-    miningUpdate();
+    miningUpdate( function() {
+        $(".genproclimit").val(genproclimit);
+    });
     setInterval("miningUpdate()", 2000);
 
     getGenerate();
